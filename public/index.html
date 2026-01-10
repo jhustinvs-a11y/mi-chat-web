@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Web - Sala de Chat</title>
+    <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Header del chat -->
+        <div class="chat-header">
+            <div class="header-left">
+                <h2>💬 Chat Web</h2>
+                <span id="user-role" class="user-role"></span>
+            </div>
+            <div class="header-right">
+                <span id="current-user" class="current-user"></span>
+                <button id="logout-btn" class="logout-btn">Cerrar Sesión</button>
+            </div>
+        </div>
+
+        <div class="chat-main">
+            <!-- Sidebar con usuarios -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <h3>👥 Usuarios Online</h3>
+                    <span id="users-count" class="users-count">0</span>
+                </div>
+                <ul id="users-list" class="users-list"></ul>
+                
+                <div class="connection-status">
+                    <div id="connection-indicator" class="connection-indicator">
+                        <span class="status-dot"></span>
+                        <span id="connection-text">Conectando...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Área de mensajes -->
+            <div class="messages-area">
+                <div id="messages" class="messages"></div>
+                
+                <!-- Input para mensajes -->
+                <div class="message-input-container">
+                    <div class="message-input">
+                        <input type="text" id="message-input" placeholder="Escribe tu mensaje..." maxlength="500">
+                        <button id="send-btn" class="send-btn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="chat.js"></script>
+</body>
+</html>
