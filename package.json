@@ -1,5 +1,5 @@
 {
-  "name": "chat-web-app",
+  "name": "mi-chat-web",
   "version": "1.0.0",
   "description": "Chat web con autenticación - Cliente/Administrador",
   "main": "server.js",
@@ -8,7 +8,7 @@
     "dev": "node server.js"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": "18.x"
   },
   "dependencies": {
     "express": "^4.18.2",
