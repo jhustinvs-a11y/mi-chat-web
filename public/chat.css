@@ -226,6 +226,54 @@ body {
     color: #666;
 }
 
+.message-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.message-header-right {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.delete-btn {
+    background: #dc3545;
+    color: white;
+    border: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.3s ease;
+}
+
+.message:hover .delete-btn {
+    opacity: 1;
+}
+
+.delete-btn:hover {
+    background: #c82333;
+    transform: scale(1.1);
+}
+
+.message.deleted {
+    opacity: 0.5;
+    background: #f8f9fa;
+}
+
+.message.deleted .message-bubble {
+    background: #e9ecef;
+    color: #6c757d;
+    font-style: italic;
+}
+
 .message-sender {
     font-weight: 600;
 }

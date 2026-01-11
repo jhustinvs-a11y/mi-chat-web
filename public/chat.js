@@ -67,6 +67,14 @@ function connectSocket() {
         displayMessage(message);
     });
     
+    // Manejar eliminación de mensajes
+    socket.on('message deleted', (messageId) => {
+        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (messageElement) {
+            messageElement.remove();
+        }
+    });
+    
     // Actualizar lista de usuarios
     socket.on('users list', (users) => {
         updateUsersList(users);
@@ -99,6 +107,7 @@ function updateConnectionStatus(connected) {
 function displayMessage(message) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message';
+    messageDiv.setAttribute('data-message-id', message.id);
     
     // Determinar si es mensaje propio
     const isOwnMessage = message.senderEmail === currentUser.email;
@@ -111,16 +120,36 @@ function displayMessage(message) {
         messageDiv.classList.add('admin');
     }
     
+    // Botón de eliminar (solo visible para admin y no en mensajes propios del admin)
+    let deleteButton = '';
+    if (currentUser.isAdmin && !isOwnMessage) {
+        deleteButton = `<button class="delete-btn" onclick="deleteMessage(${message.id})" title="Eliminar mensaje">×</button>`;
+    }
+    
     messageDiv.innerHTML = `
         <div class="message-header">
-            <span class="message-sender ${message.isAdmin ? 'admin' : ''}">${message.senderName}</span>
-            <span class="message-time">${message.timestamp}</span>
+            <div class="message-header-left">
+                <span class="message-sender ${message.isAdmin ? 'admin' : ''}">${message.senderName}</span>
+            </div>
+            <div class="message-header-right">
+                <span class="message-time">${message.timestamp}</span>
+                ${deleteButton}
+            </div>
         </div>
         <div class="message-bubble">${escapeHtml(message.message)}</div>
     `;
     
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+// Función para eliminar mensaje (solo admin)
+function deleteMessage(messageId) {
+    if (!currentUser.isAdmin) return;
+    
+    if (confirm('¿Estás seguro de que quieres eliminar este mensaje?')) {
+        socket.emit('delete message', messageId);
+    }
 }
 
 // Mostrar mensaje del sistema

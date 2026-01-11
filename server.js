@@ -187,6 +187,26 @@ io.on('connection', (socket) => {
         console.log(`${socket.user.name}: ${data.message}`);
     });
 
+    // Manejar eliminación de mensajes (solo admin)
+    socket.on('delete message', (messageId) => {
+        if (!socket.user || !socket.user.isAdmin) {
+            console.log(`Usuario no autorizado intentó borrar mensaje: ${socket.user?.name}`);
+            return;
+        }
+        
+        // Encontrar y eliminar el mensaje
+        const messageIndex = messages.findIndex(msg => msg.id === messageId);
+        if (messageIndex !== -1) {
+            const deletedMessage = messages[messageIndex];
+            messages.splice(messageIndex, 1);
+            
+            // Notificar a todos que el mensaje fue eliminado
+            io.emit('message deleted', messageId);
+            
+            console.log(`Admin ${socket.user.name} eliminó mensaje de ${deletedMessage.senderName}`);
+        }
+    });
+
     // Manejar desconexión
     socket.on('disconnect', () => {
         if (socket.user) {
