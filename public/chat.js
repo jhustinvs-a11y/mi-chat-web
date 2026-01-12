@@ -88,7 +88,7 @@ function addMessage(msg) {
     }
     
     let deleteBtn = '';
-    if (currentUser.isAdmin && msg.senderEmail !== currentUser.email) {
+    if (currentUser.isAdmin) {
         deleteBtn = `<button onclick="deleteMsg(${msg.id})">×</button>`;
     }
     
