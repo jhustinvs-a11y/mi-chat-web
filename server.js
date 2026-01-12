@@ -125,6 +125,12 @@ let connectedUsers = [];
 // Manejar conexiones de WebSocket
 io.on('connection', (socket) => {
     console.log('Usuario conectado:', socket.id);
+    
+    // Rate limiting por socket
+    let messageCount = 0;
+    let lastMessageTime = 0;
+    const messageLimit = 10; // máximo 10 mensajes por minuto
+    const timeWindow = 60000; // 1 minuto
 
     // Autenticación del socket
     socket.on('authenticate', (userEmail) => {
@@ -133,9 +139,11 @@ io.on('connection', (socket) => {
             socket.user = user;
             socket.userEmail = userEmail;
             
-            // Agregar a lista de conectados
-            const existingUser = connectedUsers.find(u => u.email === userEmail);
-            if (!existingUser) {
+            // Agregar a lista de conectados (evitar duplicados)
+            const existingUserIndex = connectedUsers.findIndex(u => u.email === userEmail);
+            if (existingUserIndex !== -1) {
+                connectedUsers[existingUserIndex].socketId = socket.id;
+            } else {
                 connectedUsers.push({
                     email: userEmail,
                     name: user.name,
@@ -144,31 +152,51 @@ io.on('connection', (socket) => {
                 });
             }
             
-            // Enviar mensajes anteriores
-            socket.emit('previous messages', messages);
+            // Enviar mensajes anteriores (solo los últimos 20)
+            const recentMessages = messages.slice(-20);
+            socket.emit('previous messages', recentMessages);
             
-            // Notificar conexión
+            // Notificar conexión (throttled)
             if (!user.isAdmin) {
                 socket.broadcast.emit('user joined', user.name);
             }
             
-            // Actualizar lista de usuarios
-            io.emit('users list', connectedUsers.filter(u => !u.isAdmin));
+            // Actualizar lista de usuarios (throttled)
+            setTimeout(() => {
+                io.emit('users list', connectedUsers.filter(u => !u.isAdmin));
+            }, 500);
             
             console.log(`${user.name} se conectó al chat`);
         }
     });
 
-    // Manejar mensajes del chat
+    // Manejar mensajes del chat con rate limiting
     socket.on('chat message', (data) => {
         if (!socket.user) return;
         
+        // Rate limiting
+        const now = Date.now();
+        if (now - lastMessageTime > timeWindow) {
+            messageCount = 0;
+            lastMessageTime = now;
+        }
+        
+        messageCount++;
+        if (messageCount > messageLimit) {
+            socket.emit('rate_limit', 'Demasiados mensajes. Espera un momento.');
+            return;
+        }
+        
+        // Validar mensaje
+        if (!data.message || typeof data.message !== 'string') return;
+        if (data.message.length > 500) return;
+        
         const messageData = {
-            id: Date.now(),
+            id: Date.now() + Math.random(), // ID más único
             senderEmail: socket.userEmail,
             senderName: socket.user.name,
             isAdmin: socket.user.isAdmin,
-            message: data.message,
+            message: data.message.trim(),
             timestamp: new Date().toLocaleTimeString(),
             date: new Date().toLocaleDateString()
         };
@@ -176,8 +204,8 @@ io.on('connection', (socket) => {
         // Guardar mensaje
         messages.push(messageData);
         
-        // Limitar a 100 mensajes
-        if (messages.length > 100) {
+        // Limitar a 50 mensajes en memoria
+        if (messages.length > 50) {
             messages.shift();
         }
         
@@ -195,7 +223,7 @@ io.on('connection', (socket) => {
         }
         
         // Encontrar y eliminar el mensaje
-        const messageIndex = messages.findIndex(msg => msg.id === messageId);
+        const messageIndex = messages.findIndex(msg => msg.id == messageId);
         if (messageIndex !== -1) {
             const deletedMessage = messages[messageIndex];
             messages.splice(messageIndex, 1);
@@ -210,15 +238,25 @@ io.on('connection', (socket) => {
     // Manejar desconexión
     socket.on('disconnect', () => {
         if (socket.user) {
+            // Remover de lista de conectados
             connectedUsers = connectedUsers.filter(u => u.socketId !== socket.id);
             
             if (!socket.user.isAdmin) {
                 socket.broadcast.emit('user left', socket.user.name);
             }
             
-            io.emit('users list', connectedUsers.filter(u => !u.isAdmin));
+            // Actualizar lista con delay para evitar spam
+            setTimeout(() => {
+                io.emit('users list', connectedUsers.filter(u => !u.isAdmin));
+            }, 1000);
+            
             console.log(`${socket.user.name} se desconectó`);
         }
+    });
+    
+    // Manejar errores del socket
+    socket.on('error', (error) => {
+        console.error('Socket error:', error);
     });
 });
 

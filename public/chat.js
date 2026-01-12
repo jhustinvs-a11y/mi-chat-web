@@ -1,6 +1,10 @@
 // Variables globales
 let socket;
 let currentUser = null;
+let isConnecting = false;
+let messageQueue = [];
+let reconnectAttempts = 0;
+const maxReconnectAttempts = 5;
 
 // Elementos del DOM
 const currentUserSpan = document.getElementById('current-user');
@@ -13,6 +17,10 @@ const usersList = document.getElementById('users-list');
 const usersCount = document.getElementById('users-count');
 const connectionIndicator = document.getElementById('connection-indicator');
 const connectionText = document.getElementById('connection-text');
+
+// Throttle para evitar spam de mensajes
+let lastMessageTime = 0;
+const messageThrottle = 500; // 500ms entre mensajes
 
 // Inicializar la aplicación
 async function init() {
@@ -39,20 +47,47 @@ async function init() {
     }
 }
 
-// Conectar al socket
+// Conectar al socket con manejo de errores mejorado
 function connectSocket() {
-    socket = io();
+    if (isConnecting) return;
+    isConnecting = true;
+    
+    socket = io({
+        timeout: 10000,
+        forceNew: true,
+        transports: ['websocket', 'polling']
+    });
     
     socket.on('connect', () => {
         console.log('Conectado al servidor');
+        isConnecting = false;
+        reconnectAttempts = 0;
         updateConnectionStatus(true);
         
         // Autenticar el socket
         socket.emit('authenticate', currentUser.email);
+        
+        // Procesar mensajes en cola
+        processMessageQueue();
     });
     
-    socket.on('disconnect', () => {
-        console.log('Desconectado del servidor');
+    socket.on('disconnect', (reason) => {
+        console.log('Desconectado del servidor:', reason);
+        updateConnectionStatus(false);
+        isConnecting = false;
+        
+        // Solo reconectar si no fue desconexión manual
+        if (reason !== 'io client disconnect' && reconnectAttempts < maxReconnectAttempts) {
+            setTimeout(() => {
+                reconnectAttempts++;
+                connectSocket();
+            }, 2000 * reconnectAttempts);
+        }
+    });
+    
+    socket.on('connect_error', (error) => {
+        console.error('Error de conexión:', error);
+        isConnecting = false;
         updateConnectionStatus(false);
     });
     
@@ -75,19 +110,40 @@ function connectSocket() {
         }
     });
     
-    // Actualizar lista de usuarios
-    socket.on('users list', (users) => {
+    // Actualizar lista de usuarios (con throttle)
+    socket.on('users list', debounce((users) => {
         updateUsersList(users);
-    });
+    }, 1000));
     
-    // Notificaciones de usuarios
-    socket.on('user joined', (username) => {
+    // Notificaciones de usuarios (con throttle)
+    socket.on('user joined', debounce((username) => {
         displaySystemMessage(`${username} se unió al chat`);
-    });
+    }, 500));
     
-    socket.on('user left', (username) => {
+    socket.on('user left', debounce((username) => {
         displaySystemMessage(`${username} salió del chat`);
-    });
+    }, 500));
+}
+
+// Función debounce para evitar spam
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Procesar cola de mensajes
+function processMessageQueue() {
+    while (messageQueue.length > 0 && socket && socket.connected) {
+        const message = messageQueue.shift();
+        socket.emit('chat message', message);
+    }
 }
 
 // Actualizar estado de conexión
@@ -97,14 +153,23 @@ function updateConnectionStatus(connected) {
     if (connected) {
         statusDot.classList.remove('disconnected');
         connectionText.textContent = 'Conectado';
+        sendBtn.disabled = false;
+        messageInput.disabled = false;
     } else {
         statusDot.classList.add('disconnected');
-        connectionText.textContent = 'Desconectado';
+        connectionText.textContent = 'Reconectando...';
+        sendBtn.disabled = true;
+        messageInput.disabled = true;
     }
 }
 
-// Mostrar mensaje en el chat
+// Mostrar mensaje en el chat (optimizado)
 function displayMessage(message) {
+    // Limitar número de mensajes en pantalla
+    if (messagesDiv.children.length > 50) {
+        messagesDiv.removeChild(messagesDiv.firstChild);
+    }
+    
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message';
     messageDiv.setAttribute('data-message-id', message.id);
@@ -129,7 +194,7 @@ function displayMessage(message) {
     messageDiv.innerHTML = `
         <div class="message-header">
             <div class="message-header-left">
-                <span class="message-sender ${message.isAdmin ? 'admin' : ''}">${message.senderName}</span>
+                <span class="message-sender ${message.isAdmin ? 'admin' : ''}">${escapeHtml(message.senderName)}</span>
             </div>
             <div class="message-header-right">
                 <span class="message-time">${message.timestamp}</span>
@@ -140,16 +205,11 @@ function displayMessage(message) {
     `;
     
     messagesDiv.appendChild(messageDiv);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-}
-
-// Función para eliminar mensaje (solo admin)
-function deleteMessage(messageId) {
-    if (!currentUser.isAdmin) return;
     
-    if (confirm('¿Estás seguro de que quieres eliminar este mensaje?')) {
-        socket.emit('delete message', messageId);
-    }
+    // Scroll suave
+    requestAnimationFrame(() => {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    });
 }
 
 // Mostrar mensaje del sistema
@@ -159,7 +219,9 @@ function displaySystemMessage(text) {
     messageDiv.innerHTML = `<div class="message-bubble">${escapeHtml(text)}</div>`;
     
     messagesDiv.appendChild(messageDiv);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    requestAnimationFrame(() => {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    });
 }
 
 // Actualizar lista de usuarios
@@ -188,29 +250,60 @@ function createUserListItem(user) {
     
     li.innerHTML = `
         <span class="user-status"></span>
-        <span>${user.name}</span>
+        <span>${escapeHtml(user.name)}</span>
     `;
     
     return li;
 }
 
-// Enviar mensaje
+// Enviar mensaje con throttle
 function sendMessage() {
+    const now = Date.now();
+    if (now - lastMessageTime < messageThrottle) {
+        return; // Ignorar si es muy rápido
+    }
+    
     const message = messageInput.value.trim();
-    if (message && socket) {
+    if (!message) return;
+    
+    // Validar longitud del mensaje
+    if (message.length > 500) {
+        alert('El mensaje es demasiado largo. Máximo 500 caracteres.');
+        return;
+    }
+    
+    lastMessageTime = now;
+    
+    if (socket && socket.connected) {
         socket.emit('chat message', { message: message });
         messageInput.value = '';
         messageInput.focus();
+    } else {
+        // Agregar a cola si no está conectado
+        messageQueue.push({ message: message });
+        messageInput.value = '';
+        alert('Mensaje guardado. Se enviará cuando se restablezca la conexión.');
+    }
+}
+
+// Función para eliminar mensaje (solo admin)
+function deleteMessage(messageId) {
+    if (!currentUser.isAdmin) return;
+    
+    if (confirm('¿Estás seguro de que quieres eliminar este mensaje?')) {
+        if (socket && socket.connected) {
+            socket.emit('delete message', messageId);
+        }
     }
 }
 
 // Cerrar sesión
 async function logout() {
     try {
-        await fetch('/logout', { method: 'POST' });
         if (socket) {
             socket.disconnect();
         }
+        await fetch('/logout', { method: 'POST' });
         window.location.href = '/';
     } catch (error) {
         console.error('Error al cerrar sesión:', error);
@@ -229,7 +322,8 @@ function escapeHtml(text) {
 sendBtn.addEventListener('click', sendMessage);
 
 messageInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
         sendMessage();
     }
 });
@@ -237,9 +331,9 @@ messageInput.addEventListener('keypress', (e) => {
 logoutBtn.addEventListener('click', logout);
 
 // Prevenir envío de mensajes vacíos
-messageInput.addEventListener('input', () => {
-    sendBtn.disabled = !messageInput.value.trim();
-});
+messageInput.addEventListener('input', debounce(() => {
+    sendBtn.disabled = !messageInput.value.trim() || !socket || !socket.connected;
+}, 100));
 
 // Inicializar cuando la página carga
 document.addEventListener('DOMContentLoaded', init);
@@ -248,5 +342,20 @@ document.addEventListener('DOMContentLoaded', init);
 window.addEventListener('beforeunload', () => {
     if (socket) {
         socket.disconnect();
+    }
+});
+
+// Manejar visibilidad de la página para pausar reconexiones
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        // Página oculta, pausar reconexiones agresivas
+        if (socket) {
+            socket.disconnect();
+        }
+    } else {
+        // Página visible, reconectar si es necesario
+        if (!socket || !socket.connected) {
+            setTimeout(connectSocket, 1000);
+        }
     }
 });
